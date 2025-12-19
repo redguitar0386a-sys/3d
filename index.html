@@ -2,16 +2,14 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<title>Hand UI Only</title>
+<title>Real Hand UI</title>
 <style>
   body {
     margin: 0;
     overflow: hidden;
     background: #000;
   }
-  video {
-    display: none;
-  }
+  video { display: none; }
   canvas {
     position: absolute;
     top: 0;
@@ -26,19 +24,23 @@
 
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
 
 <script>
-const video = document.getElementById("video");
 const canvas = document.getElementById("canvas");
 const ctx = canvas.getContext("2d");
+canvas.width = innerWidth;
+canvas.height = innerHeight;
 
-canvas.width = window.innerWidth;
-canvas.height = window.innerHeight;
+const fingers = [
+  [0,1,2,3,4],      // 親指
+  [0,5,6,7,8],      // 人差し指
+  [0,9,10,11,12],   // 中指
+  [0,13,14,15,16],  // 薬指
+  [0,17,18,19,20]   // 小指
+];
 
 const hands = new Hands({
-  locateFile: file =>
-    `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+  locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`
 });
 
 hands.setOptions({
@@ -48,40 +50,68 @@ hands.setOptions({
   minTrackingConfidence: 0.7
 });
 
-hands.onResults(results => {
-  ctx.save();
+function drawFinger(a, b) {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const dist = Math.hypot(dx, dy);
+  const angle = Math.atan2(dy, dx);
 
-  /* 左右反転 */
+  const depth = Math.max(0.5, 1 - Math.abs(a.z));
+  const thickness = 18 * depth;
+
+  ctx.save();
+  ctx.translate(a.x, a.y);
+  ctx.rotate(angle);
+
+  const grad = ctx.createLinearGradient(0, -thickness, 0, thickness);
+  grad.addColorStop(0, "#ffe0cc");
+  grad.addColorStop(0.5, "#f5c8a8");
+  grad.addColorStop(1, "#d8a27f");
+
+  ctx.fillStyle = grad;
+  ctx.beginPath();
+  ctx.roundRect(0, -thickness/2, dist, thickness, thickness/2);
+  ctx.fill();
+  ctx.restore();
+}
+
+hands.onResults(res => {
+  ctx.save();
   ctx.translate(canvas.width, 0);
   ctx.scale(-1, 1);
-
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-  if (results.multiHandLandmarks) {
-    for (const landmarks of results.multiHandLandmarks) {
-      drawConnectors(ctx, landmarks, HAND_CONNECTIONS, {
-        color: '#00ffcc',
-        lineWidth: 3
-      });
-      drawLandmarks(ctx, landmarks, {
-        color: '#ffffff',
-        lineWidth: 2,
-        radius: 4
-      });
+  if (res.multiHandLandmarks) {
+    for (const hand of res.multiHandLandmarks) {
+      const pts = hand.map(p => ({
+        x: p.x * canvas.width,
+        y: p.y * canvas.height,
+        z: p.z
+      }));
+
+      for (const finger of fingers) {
+        for (let i = 0; i < finger.length - 1; i++) {
+          drawFinger(pts[finger[i]], pts[finger[i+1]]);
+        }
+      }
+
+      for (const p of pts) {
+        const r = 6 * (1 - Math.abs(p.z));
+        ctx.fillStyle = "#fff";
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+        ctx.fill();
+      }
     }
   }
-
   ctx.restore();
 });
 
-const camera = new Camera(video, {
-  onFrame: async () => {
-    await hands.send({ image: video });
-  },
+const camera = new Camera(document.getElementById("video"), {
+  onFrame: async () => hands.send({ image: video }),
   width: 1280,
   height: 720
 });
-
 camera.start();
 </script>
 
