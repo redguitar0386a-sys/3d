@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<title>Realistic 3D Hand</title>
+<title>Skinned Real Hand</title>
 <style>
   body { margin:0; overflow:hidden; background:#000; }
   video { display:none; }
@@ -13,84 +13,47 @@
 <video id="video" autoplay playsinline></video>
 
 <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.160.0/examples/js/loaders/GLTFLoader.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
 
 <script>
-/* ========== THREE ========== */
+/* ===== THREE ===== */
 const scene = new THREE.Scene();
 
 const cam3D = new THREE.PerspectiveCamera(45, innerWidth/innerHeight, 0.1, 2000);
-cam3D.position.set(0, 0, 350);
+cam3D.position.set(0, 0, 400);
 
 const renderer = new THREE.WebGLRenderer({ antialias:true });
 renderer.setSize(innerWidth, innerHeight);
 renderer.shadowMap.enabled = true;
 document.body.appendChild(renderer.domElement);
 
-/* Lighting */
 scene.add(new THREE.AmbientLight(0xffffff, 0.4));
 
-const key = new THREE.DirectionalLight(0xfff0e0, 1.0);
-key.position.set(200, 300, 300);
-key.castShadow = true;
-scene.add(key);
+const light = new THREE.DirectionalLight(0xfff0e0, 1.2);
+light.position.set(300, 300, 300);
+scene.add(light);
 
-const rim = new THREE.DirectionalLight(0x88aaff, 0.6);
-rim.position.set(-300, 0, -300);
-scene.add(rim);
+/* Hand model */
+let hand, bones = {};
 
-/* Skin material */
-const skinMat = new THREE.MeshStandardMaterial({
-  color: 0xffd1b0,
-  roughness: 0.45,
-  metalness: 0.0
+const loader = new THREE.GLTFLoader();
+loader.load("hand.glb", gltf => {
+  hand = gltf.scene;
+  hand.scale.set(120, 120, 120);
+  scene.add(hand);
+
+  hand.traverse(o => {
+    if (o.isBone) bones[o.name] = o;
+    if (o.isMesh) {
+      o.material.roughness = 0.4;
+      o.material.metalness = 0.0;
+    }
+  });
 });
 
-/* Joints */
-const joints = [];
-const jointGeo = new THREE.SphereGeometry(5, 24, 24);
-
-for (let i = 0; i < 21; i++) {
-  const m = new THREE.Mesh(jointGeo, skinMat);
-  scene.add(m);
-  joints.push(m);
-}
-
-/* Bones */
-const bones = [];
-function makeBone() {
-  const geo = new THREE.CylinderGeometry(3, 4, 1, 16);
-  const m = new THREE.Mesh(geo, skinMat);
-  scene.add(m);
-  return m;
-}
-
-const fingers = [
-  [0,1,2,3,4],
-  [0,5,6,7,8],
-  [0,9,10,11,12],
-  [0,13,14,15,16],
-  [0,17,18,19,20]
-];
-
-fingers.forEach(f => {
-  for (let i = 0; i < f.length - 1; i++) {
-    bones.push(makeBone());
-  }
-});
-
-/* Palm mesh */
-const palmGeo = new THREE.BufferGeometry();
-const palmVerts = new Float32Array(18);
-palmGeo.setAttribute("position", new THREE.BufferAttribute(palmVerts, 3));
-const palm = new THREE.Mesh(palmGeo, skinMat);
-scene.add(palm);
-
-/* Smoothing */
-const smooth = joints.map(() => new THREE.Vector3());
-
-/* ========== MEDIAPIPE ========== */
+/* ===== MEDIAPIPE ===== */
 const hands = new Hands({
   locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`
 });
@@ -102,49 +65,40 @@ hands.setOptions({
   minTrackingConfidence: 0.7
 });
 
+/* 角度計算 */
+function angle(a, b, c) {
+  const ab = new THREE.Vector3().subVectors(a, b).normalize();
+  const cb = new THREE.Vector3().subVectors(c, b).normalize();
+  return Math.acos(ab.dot(cb));
+}
+
 hands.onResults(r => {
-  if (!r.multiHandLandmarks) return;
+  if (!r.multiHandLandmarks || !hand) return;
 
-  const lm = r.multiHandLandmarks[0];
+  const lm = r.multiHandLandmarks[0].map(p =>
+    new THREE.Vector3(p.x, p.y, p.z)
+  );
 
-  lm.forEach((p, i) => {
-    const target = new THREE.Vector3(
-      (p.x - 0.5) * -300,
-      -(p.y - 0.5) * 300,
-      -p.z * 300
-    );
-    smooth[i].lerp(target, 0.5);
-    joints[i].position.copy(smooth[i]);
-  });
+  const fingers = {
+    index: [5,6,7,8],
+    middle:[9,10,11,12],
+    ring:  [13,14,15,16],
+    pinky:[17,18,19,20],
+    thumb:[1,2,3,4]
+  };
 
-  /* bones */
-  let b = 0;
-  fingers.forEach(f => {
-    for (let i = 0; i < f.length - 1; i++) {
-      const a = joints[f[i]].position;
-      const c = joints[f[i+1]].position;
-      const bone = bones[b++];
+  for (const f in fingers) {
+    const ids = fingers[f];
+    for (let i = 0; i < 3; i++) {
+      const a = lm[ids[i]];
+      const b = lm[ids[i+1]];
+      const c = lm[ids[i+2]];
+      const ang = angle(a,b,c);
 
-      const mid = a.clone().add(c).multiplyScalar(0.5);
-      bone.position.copy(mid);
-
-      const dir = c.clone().sub(a);
-      bone.scale.set(1, dir.length(), 1);
-      bone.lookAt(c);
-      bone.rotateX(Math.PI / 2);
+      const bone = bones[`${f}_${i+1}`];
+      if (bone) bone.rotation.x = -ang;
     }
-  });
-
-  /* palm */
-  const idx = [0,5,9,13,17,0];
-  const pos = palm.geometry.attributes.position.array;
-  idx.forEach((i, n) => {
-    pos[n*3+0] = joints[i].position.x;
-    pos[n*3+1] = joints[i].position.y;
-    pos[n*3+2] = joints[i].position.z;
-  });
-  palm.geometry.attributes.position.needsUpdate = true;
-  palm.geometry.computeVertexNormals();
+  }
 });
 
 /* Camera */
