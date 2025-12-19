@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<title>Hand Tracking Demo</title>
+<title>Hand UI Only</title>
 <style>
   body {
     margin: 0;
@@ -10,7 +10,7 @@
     background: #000;
   }
   video {
-    display: none; /* カメラ映像を見せない */
+    display: none;
   }
   canvas {
     position: absolute;
@@ -56,14 +56,18 @@ hands.onResults(results => {
   ctx.scale(-1, 1);
 
   ctx.clearRect(0, 0, canvas.width, canvas.height);
-  ctx.drawImage(results.image, 0, 0, canvas.width, canvas.height);
 
   if (results.multiHandLandmarks) {
     for (const landmarks of results.multiHandLandmarks) {
-      drawConnectors(ctx, landmarks, HAND_CONNECTIONS,
-        { color: '#00FF00', lineWidth: 2 });
-      drawLandmarks(ctx, landmarks,
-        { color: '#FF0000', lineWidth: 1 });
+      drawConnectors(ctx, landmarks, HAND_CONNECTIONS, {
+        color: '#00ffcc',
+        lineWidth: 3
+      });
+      drawLandmarks(ctx, landmarks, {
+        color: '#ffffff',
+        lineWidth: 2,
+        radius: 4
+      });
     }
   }
 
